@@ -34,7 +34,15 @@ init(SoFile) -> fdb_nif:init(SoFile).
 -spec init()-> ok | {error, term()}.
 %% @end
 init() ->
-  init("priv/fdb_nif").
+  PrivDir = case code:priv_dir(?MODULE) of
+              {error, bad_name} ->
+                EbinDir = filename:dirname(code:which(?MODULE)),
+                AppPath = filename:dirname(EbinDir),
+                filename:join(AppPath, "priv");
+              Path ->
+                Path
+            end,
+  init(filename:join(PrivDir,"fdb_nif")).
 
 %% @doc Specify the API version we are using
 %%

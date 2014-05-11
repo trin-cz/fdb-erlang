@@ -1,6 +1,6 @@
 -module(directory).
 
--export([get/2, get/3, get_range/3, set/3]).
+-export([get/2, get/3, get_range/2, get_range/3, set/3]).
 -export([clear/2, clear_range/3]).
 -export([transact/2]).
 
@@ -12,13 +12,14 @@
 
 -include("../../include/fdb.hrl").
 
-get(D = {dir, _, _}, Select = #select{}) -> subspace:get(get_subspace(D),Select);
 get(D = {dir, _, _}, Key) -> subspace:get(get_subspace(D),Key).
 
 get(D = {dir, _, _}, Key, Default) -> subspace:get(get_subspace(D),Key, Default).
 
 set(D = {dir, _, _}, Key, Value) -> 
   subspace:set(get_subspace(D),Key, Value).
+
+get_range(D = {dir, _, _}, Select = #select{}) -> subspace:get(get_subspace(D),Select).
 
 get_range(D = {dir, _, _}, Begin, End) -> subspace:get_range(get_subspace(D),Begin,End).
 

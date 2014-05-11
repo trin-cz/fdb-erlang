@@ -10,7 +10,7 @@ hello_world_test() ->
   AKey = <<"Hello">>,
   AValue = <<"World">>,
   ok = fdb:set(DB, AKey, AValue),
-  AValue = fdb:get(DB, AKey),
+  {ok, AValue} = fdb:get(DB, AKey),
   ok = fdb:clear(DB, AKey),
   ?assertEqual(not_found, fdb:get(DB, AKey)).
 
@@ -23,7 +23,7 @@ transaction_test() ->
   fdb:transact(DB, fun(Tx)->
         fdb:set(Tx, AKey, AValue)
     end),
-  ?assertEqual(AValue, fdb:get(DB, AKey)),
+  ?assertEqual({ok, AValue}, fdb:get(DB, AKey)),
   ok = fdb:clear(DB, AKey).
 
 range_test() ->
@@ -31,36 +31,36 @@ range_test() ->
   fdb:transact(DB, fun(Tx) ->
                        [ok = fdb:set(Tx, I, I) || I <- lists:seq(1, 9)]
                    end),
-  ?assertEqual([{2, 2}, {3, 3},{4, 4}], fdb:get(DB, #select{gte = 2, lte = 4})),
-  ?assertEqual([{2, 2}, {3, 3}], fdb:get(DB, #select{ gte = 2, lte =3})),
-  ?assertEqual([{2, 2}, {3, 3}], fdb:get(DB, #select{ gt = 1, lt = 4})),
-  ?assertEqual([{8, 8}, {9, 9}], fdb:get(DB, #select{ gt = 7, lt = 10})),
-  ?assertEqual([{1, 1}, {2, 2}], fdb:get(DB, #select{ gt = 0, lt = 3})),
+  ?assertEqual([{2, 2}, {3, 3},{4, 4}], fdb:get_range(DB, #select{gte = 2, lte = 4})),
+  ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(DB, #select{ gte = 2, lte =3})),
+  ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(DB, #select{ gt = 1, lt = 4})),
+  ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(DB, #select{ gt = 7, lt = 10})),
+  ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(DB, #select{ gt = 0, lt = 3})),
   ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(DB, 2, 4)),
-  ?assertEqual([{1, 1}, {2, 2}], fdb:get(DB, #select{ gt=0, lt = 3})),
-  ?assertEqual([{1, 1}, {2, 2}], fdb:get(DB, #select{ gt=0, lt = 3})),
-  ?assertEqual([{8, 8}, {9, 9}], fdb:get(DB, #select{ gt=7})),
-  ?assertEqual([{8, 8}, {9, 9}], fdb:get(DB, #select{ gte = 8})),
+  ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(DB, #select{ gt=0, lt = 3})),
+  ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(DB, #select{ gt=0, lt = 3})),
+  ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(DB, #select{ gt=7})),
+  ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(DB, #select{ gte = 8})),
   fdb:clear_range(DB, 4, 8),
-  ?assertEqual([{3, 3}, {8, 8}], fdb:get(DB, #select{ gt = 2, lt = 9})),
+  ?assertEqual([{3, 3}, {8, 8}], fdb:get_range(DB, #select{ gt = 2, lt = 9})),
   fdb:clear_range(DB, 1, 9).
 
 range_single_transaction_test() ->
   DB = fdb:init_and_open(?SOLIB),
   fdb:transact(DB, fun(Tx) ->
    [ok = fdb:set(Tx, I, I) || I <- lists:seq(1, 9)],
-    ?assertEqual([{2, 2}, {3, 3},{4, 4}], fdb:get(Tx, #select{gte = 2, lte = 4})),
-    ?assertEqual([{2, 2}, {3, 3}], fdb:get(Tx, #select{ gte = 2, lte =3})),
-    ?assertEqual([{2, 2}, {3, 3}], fdb:get(Tx, #select{ gt = 1, lt = 4})),
-    ?assertEqual([{8, 8}, {9, 9}], fdb:get(Tx, #select{ gt = 7, lt = 10})),
-    ?assertEqual([{1, 1}, {2, 2}], fdb:get(Tx, #select{ gt = 0, lt = 3})),
+    ?assertEqual([{2, 2}, {3, 3},{4, 4}], fdb:get_range(Tx, #select{gte = 2, lte = 4})),
+    ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(Tx, #select{ gte = 2, lte =3})),
+    ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(Tx, #select{ gt = 1, lt = 4})),
+    ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(Tx, #select{ gt = 7, lt = 10})),
+    ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(Tx, #select{ gt = 0, lt = 3})),
     ?assertEqual([{2, 2}, {3, 3}], fdb:get_range(Tx, 2, 4)),
-    ?assertEqual([{1, 1}, {2, 2}], fdb:get(Tx, #select{ gt=0, lt = 3})),
-    ?assertEqual([{1, 1}, {2, 2}], fdb:get(Tx, #select{ gt=0, lt = 3})),
-    ?assertEqual([{8, 8}, {9, 9}], fdb:get(Tx, #select{ gt=7})),
-    ?assertEqual([{8, 8}, {9, 9}], fdb:get(Tx, #select{ gte = 8})),
+    ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(Tx, #select{ gt=0, lt = 3})),
+    ?assertEqual([{1, 1}, {2, 2}], fdb:get_range(Tx, #select{ gt=0, lt = 3})),
+    ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(Tx, #select{ gt=7})),
+    ?assertEqual([{8, 8}, {9, 9}], fdb:get_range(Tx, #select{ gte = 8})),
     fdb:clear_range(Tx, 4, 8),
-    ?assertEqual([{3, 3}, {8, 8}], fdb:get(Tx, #select{ gt = 2, lt = 9}))
+    ?assertEqual([{3, 3}, {8, 8}], fdb:get_range(Tx, #select{ gt = 2, lt = 9}))
                    end),
   fdb:clear_range(DB, 1, 9).
   

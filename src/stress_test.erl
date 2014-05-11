@@ -36,4 +36,3 @@ report(L) ->
           "Median: ~b mics~n"
           "Average: ~b mics~n",
           [Min, Max, Med, Avg]).
-    

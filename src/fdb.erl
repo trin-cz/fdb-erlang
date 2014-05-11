@@ -1,7 +1,7 @@
 -module(fdb).
 -export([init/0, init/1]).
 -export([api_version/1, open/0]).
--export([get/2, get/3, get_range/3, set/3]).
+-export([get/2, get/3, get_range/2, get_range/3, set/3]).
 -export([clear/2, clear_range/3]).
 -export([transact/2]).
 -export([init_and_open/0, init_and_open/1]).
@@ -92,41 +92,46 @@ init_and_open(SoFile) ->
     fun(DB) -> DB end
   ]).
 
-%% @doc Gets a value using a key or multiple values using a selector
-%%
-%% Returns `not_found` for the single value if the key is not found, 
--spec get(fdb_handle(), fdb_key()|#select{}) -> (term() | not_found | [term()]).
+%% @doc Gets a value using a key, falls back to a default value if not found
+-spec get(fdb_handle(), fdb_key(), term()) -> term().
 %% @end
-get(DB={db, _}, Select = #select{}) ->
-  transact(DB, fun(Tx) -> get(Tx, Select) end);
-get(Tx={tx, _}, Select = #select{}) ->
-  Iterator = bind(Tx, Select),
-  Next = next(Iterator),
-  Next#iterator.data;
-get(FdbHandle, Key) -> 
-  get(FdbHandle, Key, not_found).
+get(Handle, Key, Default) ->
+  case get(Handle, Key) of
+    {ok, Value} -> Value;
+    not_found   -> Default
+  end.
+
+%% @doc Gets a value using a key
+-spec get(fdb_handle(), fdb_key()) -> {ok, term()} | not_found.
+%% @end
+get(DB={db, _Database}, Key) ->
+  transact(DB, fun(Tx) -> get(Tx, Key) end);
+get({tx, Tx}, Key) ->
+  maybe_do([
+  fun()-> fdb_nif:fdb_transaction_get(Tx, tuple:pack(Key)) end,
+  fun(GetF) -> future_get(GetF, value) end,
+  fun(Result) -> case Result of
+      %% the result from future_get_value nif is either 'not_found' or a binary
+      not_found -> not_found;
+      _         -> {ok, binary_to_term(Result)}
+   end
+  end]).
 
 %% @doc Gets a range of key-value tuples where `begin <= X < end`
 -spec get_range(fdb_handle(), fdb_key(),fdb_key()) -> ([term()]|{error,nif_not_loaded}).
 %% @end
 get_range(Handle, Begin, End) ->
-  get(Handle, #select{gte = Begin, lt = End}).
+  get_range(Handle, #select{gte = Begin, lt = End}).
 
-
-%% @doc Gets a value using a key, falls back to a default value if not found
--spec get(fdb_handle(), fdb_key(), term()) -> term().
+%% @doc Gets a range of key-value tuples where `begin <= X < end`
+-spec get_range(fdb_handle(), #select{}) -> ([term()]|{error,nif_not_loaded}).
 %% @end
-get(DB={db, _Database}, Key, DefaultValue) ->
-  transact(DB, fun(Tx) -> get(Tx, Key, DefaultValue) end);
-get({tx, Tx}, Key, DefaultValue) ->
-  maybe_do([
-  fun()-> fdb_nif:fdb_transaction_get(Tx, tuple:pack(Key)) end,
-  fun(GetF) -> future_get(GetF, value) end,
-  fun(Result) -> case Result of
-      not_found -> DefaultValue;
-      _ -> binary_to_term(Result)
-   end
-  end]).
+get_range(DB={db,_}, Select = #select{}) ->
+  transact(DB, fun(Tx) -> get_range(Tx, Select) end);
+get_range(Tx={tx, _}, Select = #select{}) ->
+  Iterator = bind(Tx, Select),
+  Next = next(Iterator),
+  Next#iterator.data.
 
 %% @doc Binds a range of data to an iterator; use `fdb:next` to iterate it
 -spec bind(fdb_handle(), #select{}) -> #iterator{}.

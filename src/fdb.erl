@@ -1,48 +1,27 @@
 -module(fdb).
+
+%% This is basically just tuple and term layer on top of fdb_raw
+%% All keys are encoded/decoded using tuple:pack/unpack
+%% All values are encoded/decoded using term_to_binary/binary_to_term
+
 -export([init/0, init/1]).
 -export([api_version/1, open/0]).
 -export([get/2, get/3, get_range/2, get_range/3, set/3]).
 -export([clear/2, clear_range/3]).
 -export([transact/2]).
 -export([init_and_open/0, init_and_open/1]).
--export([maybe_do/1]).
 
--behaviour(gen_fdb).
-
--define (FDB_API_VERSION, 21).
-
--define (FUTURE_TIMEOUT, 5000).
 -include("../include/fdb.hrl").
-
-maybe_do(Fs) ->
-  Wrapped = lists:map(fun wrap_fdb_result_fun/1, Fs),
-  maybe:do(Wrapped).
-
-wrap_fdb_result_fun(F) ->
-  case erlang:fun_info(F, arity) of
-   {arity, 0} -> fun( ) -> handle_fdb_result(F()) end;
-   {arity, 1} -> fun(X) -> handle_fdb_result(F(X)) end;
-   _ -> throw({error, unsupported_arity })
-  end.
 
 %% @doc Loads the native FoundationDB library file from a certain location
 -spec init(SoFile::list())-> ok | {error, term()}.
 %% @end
-init(SoFile) -> fdb_nif:init(SoFile).
+init(SoFile) -> fdb_raw:init(SoFile).
 
 %% @doc Loads the native FoundationDB library file from  `priv/fdb_nif.so`
 -spec init()-> ok | {error, term()}.
 %% @end
-init() ->
-  PrivDir = case code:priv_dir(?MODULE) of
-              {error, bad_name} ->
-                EbinDir = filename:dirname(code:which(?MODULE)),
-                AppPath = filename:dirname(EbinDir),
-                filename:join(AppPath, "priv");
-              Path ->
-                Path
-            end,
-  init(filename:join(PrivDir,"fdb_nif")).
+init() -> fdb_raw:init().
 
 %% @doc Specify the API version we are using
 %%
@@ -51,7 +30,7 @@ init() ->
 -spec api_version(fdb_version()) -> fdb_cmd_result().
 %% @end
 api_version(Version) ->
-  handle_fdb_result(fdb_nif:fdb_select_api_version(Version)).
+  fdb_raw:api_version(Version).
 
 %% @doc  Opens the given database 
 %% 
@@ -60,37 +39,17 @@ api_version(Version) ->
 %% Initializes the FDB interface as required.
 -spec open() -> fdb_database().
 %% @end
-open() ->
-  maybe_do([
-  fun () -> fdb_nif:fdb_setup_network() end,
-  fun () -> fdb_nif:fdb_run_network() end,
-  fun () -> fdb_nif:fdb_create_cluster() end,
-  fun (ClF) -> future_get(ClF, cluster) end,
-  fun (ClHandle) -> fdb_nif:fdb_cluster_create_database(ClHandle) end,
-  fun (DatabaseF) -> future_get(DatabaseF, database) end,
-  fun (DbHandle) -> {ok,{db, DbHandle}} end]).
+open() -> fdb_raw:open().
 
 %% @doc Initializes the driver and returns a database handle
 -spec init_and_open() -> fdb_database().
 %% end
-init_and_open() ->
-  init(),
-  api_version(100),
-  maybe_do([
-    fun() -> open() end,
-    fun(DB) -> DB end
-  ]).
+init_and_open() -> fdb_raw:init_and_open().
 
 %% @doc Initializes the driver and returns a database handle
 -spec init_and_open(SoFile::list()) -> fdb_database().
 %% end
-init_and_open(SoFile) ->
-  init(SoFile),
-  api_version(100),
-  maybe_do([
-    fun() -> open() end,
-    fun(DB) -> DB end
-  ]).
+init_and_open(SoFile) -> fdb_raw:init_and_open(SoFile).
 
 %% @doc Gets a value using a key, falls back to a default value if not found
 -spec get(fdb_handle(), fdb_key(), term()) -> term().
@@ -104,18 +63,11 @@ get(Handle, Key, Default) ->
 %% @doc Gets a value using a key
 -spec get(fdb_handle(), fdb_key()) -> {ok, term()} | not_found.
 %% @end
-get(DB={db, _Database}, Key) ->
-  transact(DB, fun(Tx) -> get(Tx, Key) end);
-get({tx, Tx}, Key) ->
-  maybe_do([
-  fun()-> fdb_nif:fdb_transaction_get(Tx, tuple:pack(Key)) end,
-  fun(GetF) -> future_get(GetF, value) end,
-  fun(Result) -> case Result of
-      %% the result from future_get_value nif is either 'not_found' or a binary
-      not_found -> not_found;
-      _         -> {ok, binary_to_term(Result)}
-   end
-  end]).
+get(Handle, Key) ->
+  case fdb_raw:get(Handle, tuple:pack(Key)) of
+    {ok, Value} -> {ok, binary_to_term(Value)};
+    not_found   -> not_found
+  end.
 
 %% @doc Gets a range of key-value tuples where `begin <= X < end`
 -spec get_range(fdb_handle(), fdb_key(),fdb_key()) -> ([term()]|{error,nif_not_loaded}).
@@ -126,140 +78,42 @@ get_range(Handle, Begin, End) ->
 %% @doc Gets a range of key-value tuples where `begin <= X < end`
 -spec get_range(fdb_handle(), #select{}) -> ([term()]|{error,nif_not_loaded}).
 %% @end
-get_range(DB={db,_}, Select = #select{}) ->
-  transact(DB, fun(Tx) -> get_range(Tx, Select) end);
-get_range(Tx={tx, _}, Select = #select{}) ->
-  Iterator = bind(Tx, Select),
-  Next = next(Iterator),
-  Next#iterator.data.
-
-%% @doc Binds a range of data to an iterator; use `fdb:next` to iterate it
--spec bind(fdb_handle(), #select{}) -> #iterator{}.
-%% @end
-bind(DB={db, _}, Select = #select{}) ->
-  transact(DB, fun(Tx) -> bind(Tx, Select) end);
-bind({tx, Transaction}, Select = #select{}) ->
-  #iterator{tx = Transaction, select = Select, iteration = Select#select.iteration}.
-
-%% @doc Get data of an iterator; returns the iterator or `done` when finished
--spec next(#iterator{}) -> (#iterator{}).
-%% @end
-next(Iterator = #iterator{tx = Transaction, iteration = Iteration, select = Select}) ->
-  {FstKey, FstIsEq, FstOfs} = fst_gt(Select#select.gt, Select#select.gte),
-  {LstKey, LstIsEq, LstOfs} = lst_lt(Select#select.lt, Select#select.lte),
-  maybe_do([
-   fun() -> fdb_nif:fdb_transaction_get_range(Transaction, 
-      FstKey, FstIsEq, Select#select.offset_begin + FstOfs,
-      <<LstKey/binary>>, LstIsEq, Select#select.offset_end + LstOfs,
-      Select#select.limit, 
-      Select#select.target_bytes, 
-      Select#select.streaming_mode, 
-      Iteration, 
-      Select#select.is_snapshot, 
-      Select#select.is_reverse) end,
-   fun(F) -> {fdb_nif:fdb_future_is_ready(F),F} end,
-   fun(Ready) -> wait_non_blocking(Ready) end, 
-   fun(F) -> future_get(F, keyvalue_array) end,
-   fun(EncodedData) -> 
-     Iterator#iterator{ 
-        data = lists:map(fun unpack_array_row/1, EncodedData),
-        iteration = Iteration + 1, 
-        out_more = false}
-    end]).
-
-unpack_array_row({X,Y}) -> 
-  {tuple:unpack(X), binary_to_term(Y)}.
-
-fst_gt(nil, nil) -> {<<0>>, true, 0};
-fst_gt(nil, Value) -> { tuple:pack(Value), true, 0  };
-fst_gt(Value, nil) -> { tuple:pack(Value), true, 1 }.
-
-lst_lt(nil, nil) -> {<<255>>, false, 1};
-lst_lt(nil, Value) -> { tuple:pack(Value), true, 1 };
-lst_lt(Value, nil) -> { tuple:pack(Value), false, 1 }.
+get_range(Handle, Select = #select{}) ->
+  EncodedData = fdb_raw:get_range(Handle, encode(Select)),
+  [ {tuple:unpack(K), binary_to_term(V)} || {K,V} <- EncodedData ].
 
 %% @doc sets a key and value
 %% Existing values will be overwritten
 -spec set(fdb_handle(), fdb_key(), term()) -> fdb_cmd_result().
 %% @end
-set({db, Database}, Key, Value) ->
-  transact({db, Database}, fun (Tx)-> set(Tx, Key, Value) end);
-set({tx, Tx}, Key, Value) ->
-  ErrCode = fdb_nif:fdb_transaction_set(Tx, tuple:pack(Key), term_to_binary(Value)),
-  handle_fdb_result(ErrCode).
+set(Handle, Key, Value) ->
+  fdb_raw:set(Handle, tuple:pack(Key), term_to_binary(Value)).
 
 %% @doc Clears a key and it's value
 -spec clear(fdb_handle(), fdb_key()) -> fdb_cmd_result().
 %% @end
-clear({db, Database}, Key) ->
-  transact({db, Database}, fun (Tx)-> clear(Tx, Key) end);
-clear({tx, Tx}, Key) ->
-  ErrCode = fdb_nif:fdb_transaction_clear(Tx, tuple:pack(Key)),
-  handle_fdb_result(ErrCode).
+clear(Handle, Key) ->
+  fdb_raw:clear(Handle, tuple:pack(Key)).
 
 %% @doc Clears all keys where `begin <= X < end`
 -spec clear_range(fdb_handle(), fdb_key(), fdb_key()) -> fdb_cmd_result().
 %% @end
-clear_range({db, Database}, Begin, End) ->
-  transact({db, Database}, fun (Tx)-> clear_range(Tx, Begin, End) end);
-clear_range({tx, Tx}, Begin, End) ->
-  ErrCode = fdb_nif:fdb_transaction_clear_range(Tx, tuple:pack(Begin), tuple:pack(End)),
-  handle_fdb_result(ErrCode).
+clear_range(Handle, Begin, End) ->
+  fdb_raw:clear_range(Handle, tuple:pack(Begin), tuple:pack(End)).
 
 -spec transact(fdb_database(), fun((fdb_transaction())->term())) -> term().
-transact({db, DbHandle}, DoStuff) ->
-  CommitResult = attempt_transaction(DbHandle, DoStuff),
-  handle_transaction_attempt(CommitResult).
+transact(DB = {db, _DbHandle}, DoStuff) ->
+  fdb_raw:transact(DB, DoStuff).
 
-attempt_transaction(DbHandle, DoStuff) ->
-  maybe_do([
-  fun() -> fdb_nif:fdb_database_create_transaction(DbHandle) end,
-  fun(Tx) -> 
-      Result = DoStuff({tx, Tx}),
-      ApplySelf = fun() -> attempt_transaction(DbHandle, DoStuff) end,
-      CommitF = fdb_nif:fdb_transaction_commit(Tx), 
-      {future(CommitF), Tx, Result, ApplySelf}
-     end
-  ]).
-
-handle_transaction_attempt({ok, _Tx, Result, _ApplySelf}) -> Result;
-handle_transaction_attempt({{error, Err}, Tx, _Result, ApplySelf}) ->
-  OnErrorF = fdb_nif:fdb_transaction_on_error(Tx, Err),
-  maybe_do([
-    fun () -> future(OnErrorF) end,
-    fun () -> ApplySelf() end
-  ]).
-
-handle_fdb_result({0, RetVal}) -> {ok, RetVal};
-handle_fdb_result({error, 2009}) -> ok;
-handle_fdb_result({error, network_already_running}) -> ok;
-handle_fdb_result({Err = {error, _}, _F}) -> Err;
-handle_fdb_result(Other) -> Other.
-
-future(F) -> future_get(F, none).
-
-future_get(F, FQuery) -> 
-  maybe_do([
-    fun() -> {fdb_nif:fdb_future_is_ready(F), F} end,
-    fun(Ready) -> wait_non_blocking(Ready) end,
-    fun() -> fdb_nif:fdb_future_get_error(F) end,
-    fun() -> get_future_property(F, FQuery) end
-  ]).
-
-get_future_property(_F,none) ->
-  ok;
-get_future_property(F,FQuery) ->
-  FullQuery = list_to_atom("fdb_future_get_" ++ atom_to_list(FQuery)),
-  apply(fdb_nif, FullQuery, [F]).
-
-wait_non_blocking({false,F}) ->
-  Ref = make_ref(),
-  maybe_do([
-  fun ()-> fdb_nif:send_on_complete(F,self(),Ref),
-    receive
-      Ref -> {ok, F}
-      after ?FUTURE_TIMEOUT -> {error, timeout}
-    end
-  end]);
-wait_non_blocking({true,F}) ->
-  {ok, F}.
+encode(Select = #select{ gt  = GT0
+                       , gte = GTE0
+                       , lt  = LT0
+                       , lte = LTE0
+                       }) ->
+  Select#select{ gt  = encode(GT0 )
+               , gte = encode(GTE0)
+               , lt  = encode(LT0 )
+               , lte = encode(LTE0)
+               };
+encode(nil) -> nil;
+encode(Key) -> tuple:pack(Key).

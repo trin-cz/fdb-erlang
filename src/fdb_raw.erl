@@ -10,6 +10,7 @@
         , init/1
         , init_and_open/0
         , init_and_open/1
+        , init_and_open_try_5_times/1
         , maybe_do/1
         , next/2
         , open/0
@@ -101,8 +102,7 @@ init_and_open() ->
   init(),
   api_version(100),
   maybe_do([
-    fun() -> open() end,
-    fun(DB) -> DB end
+    fun() -> open() end
   ]).
 
 %% @doc Initializes the driver and returns a database handle
@@ -112,9 +112,22 @@ init_and_open(SoFile) ->
   init(SoFile),
   api_version(100),
   maybe_do([
-    fun() -> open() end,
-    fun(DB) -> DB end
+    fun() -> open() end
   ]).
+
+init_and_open_try_5_times(SoFile) ->
+  init_and_open_try_5_times(SoFile, 5).
+
+init_and_open_try_5_times(SoFile, N) ->
+  case init_and_open(SoFile) of
+    {ok, DB} -> {ok, DB};
+    Error    -> case N of
+      0 -> Error;
+      _ ->
+        timer:sleep(100),
+        init_and_open_try_5_times(SoFile, N-1)
+    end
+  end.
 
 %% @doc Gets a value using a key
 -spec get(fdb_handle(), fdb_key()) -> {ok, term()} | not_found.

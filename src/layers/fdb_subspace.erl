@@ -12,8 +12,6 @@
 
 -include("../../include/fdb.hrl").
 
--include_lib("eunit/include/eunit.hrl").
-
 -type subspace_handle() :: {ss, binary(), fdb_handle()}.
 
 -spec clear(subspace_handle(), fdb_key()) -> ok.
@@ -46,7 +44,6 @@ get_range({ss,Prefix,Handle}, Select0 = #select{}) ->
   Select2 = cap_infinity(Prefix, Select1),
   fdb_raw:maybe_do([ fun()  -> fdb_raw:get_range(Handle, Select2) end
                    , fun(L) ->
-                        ?debugFmt("L: ~p~n~p", [L, Select2]),
                        [  {tuple_unpack(remove_prefix(Prefix, K)), binary_to_term(V)}
                        || {K,V} <- L ]
                      end
@@ -57,7 +54,6 @@ get_range(Subspace,Begin,End) ->
 
 remove_prefix(Prefix, FullKey) ->
   PrefixSize = size(Prefix),
-  ?debugFmt("remove prefix: ~p, ~p, ~p ...", [Prefix, PrefixSize, FullKey]),
   <<Prefix:PrefixSize/binary, Key/binary>> = FullKey,
   Key.
 

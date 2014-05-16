@@ -6,7 +6,7 @@
 -define(SOLIB,"../priv/fdb_nif").
 
 hello_world_test() ->
-  DB = fdb:init_and_open(?SOLIB),
+  {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
   AKey = <<"Hello">>,
   AValue = <<"World">>,
   ok = fdb:set(DB, AKey, AValue),
@@ -15,7 +15,7 @@ hello_world_test() ->
   ?assertEqual(not_found, fdb:get(DB, AKey)).
 
 transaction_test() ->
-  DB = fdb:init_and_open(?SOLIB),
+  {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
   AKey = <<"abc">>,
   AValue = <<"xyz">>,
   ok = fdb:clear(DB, AKey),
@@ -27,7 +27,7 @@ transaction_test() ->
   ok = fdb:clear(DB, AKey).
 
 range_test() ->
-  DB = fdb:init_and_open(?SOLIB),
+  {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
   fdb_raw:clear_range(DB, <<0>>, <<255:8>>),
   fdb:transact(DB, fun(Tx) ->
                        [ok = fdb:set(Tx, I, I) || I <- lists:seq(1, 9)]
@@ -47,7 +47,7 @@ range_test() ->
   fdb:clear_range(DB, 1, 9).
 
 range_single_transaction_test() ->
-  DB = fdb:init_and_open(?SOLIB),
+  {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
   fdb_raw:clear_range(DB, <<0>>, <<255:8>>),
   fdb:transact(DB, fun(Tx) ->
    [ok = fdb:set(Tx, I, I) || I <- lists:seq(1, 9)],
@@ -65,5 +65,3 @@ range_single_transaction_test() ->
     ?assertEqual([{3, 3}, {8, 8}], fdb:get_range(Tx, #select{ gt = 2, lt = 9}))
                    end),
   fdb:clear_range(DB, 1, 9).
-  
-

@@ -25,6 +25,26 @@ basic_test()->
   ?assertEqual( []
               , fdb_subspace:get_range(SpaceB, nil, nil)).
 
+next_test() ->
+  {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
+  Subspace = fdb_subspace:open(DB, <<"__test">>),
+  fdb_subspace:clear_range(Subspace, nil, nil),
+  [ok = fdb_subspace:set(Subspace, I, I) || I <- lists:seq(1, 9)],
+  ?assertEqual( {ok, {3,3}}
+              , fdb_subspace:next(Subspace, 2)),
+  ?assertEqual( {ok, {4,4}}
+              , fdb_subspace:next(Subspace, 3)),
+  ?assertEqual( {ok, {9,9}}
+              , fdb_subspace:next(Subspace, 8)),
+  ?assertEqual( not_found
+              , fdb_subspace:next(Subspace, 9)),
+  ?assertEqual( {ok, {1,1}}
+              , fdb_subspace:previous(Subspace, 2)),
+  ?assertEqual( not_found
+              , fdb_subspace:previous(Subspace, 1)),
+  fdb_subspace:clear_range(Subspace, nil, nil),
+  ok.
+
 range_test() ->
   {ok, DB} = fdb_raw:init_and_open_try_5_times(?SOLIB),
   range_test_core(DB).
